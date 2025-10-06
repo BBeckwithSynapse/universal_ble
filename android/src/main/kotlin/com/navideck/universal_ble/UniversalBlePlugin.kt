@@ -28,6 +28,9 @@ import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.PluginRegistry
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -38,7 +41,7 @@ private const val TAG = "UniversalBlePlugin"
 
 @SuppressLint("MissingPermission")
 class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(), FlutterPlugin,
-    ActivityAware, PluginRegistry.ActivityResultListener {
+    ActivityAware, PluginRegistry.ActivityResultListener, MethodChannel.MethodCallHandler {
     private val bluetoothEnableRequestCode = 2342313
     private val bluetoothDisableRequestCode = 2342414
     private var callbackChannel: UniversalBleCallbackChannel? = null
@@ -49,6 +52,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
     private lateinit var safeScanner: SafeScanner
     private val cachedServicesMap = mutableMapOf<String, List<String>>()
     private val universalBleFilterUtil = UniversalBleFilterUtil()
+    private lateinit var priorityChannel: MethodChannel
 
     // Flutter Futures
     private var bluetoothEnableRequestFuture: ((Result<Boolean>) -> Unit)? = null
@@ -76,6 +80,8 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
             context.registerReceiver(broadcastReceiver, intentFilter)
         }
         cachedServicesMap.putAll(getCachedServicesMap())
+        priorityChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "universal_ble/conn_priority")
+        priorityChannel.setMethodCallHandler(this)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -83,6 +89,34 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         context.unregisterReceiver(broadcastReceiver)
         callbackChannel = null
         mainThreadHandler = null
+        priorityChannel.setMethodCallHandler(null)
+    }
+
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "ping" -> { result.success("pong") }
+            "setConnectionPriority" -> {
+                val deviceId = call.argument<String>("deviceId")
+                val prio = call.argument<Int>("priority") ?: 0
+                if (deviceId.isNullOrEmpty()) {
+                    result.error("bad_args", "deviceId required", null)
+                    return
+                }
+                val ok = setPriorityForDevice(deviceId, prio)
+                if (ok) result.success(null) else result.error("not_connected", "No active GATT for $deviceId", null)
+            }
+            else -> result.notImplemented()
+        }
+    }
+
+    private fun setPriorityForDevice(deviceId: String, prio: Int): Boolean {
+        val gatt = deviceId.findGatt() ?: return false  // <- use existing helper
+        val mapped = when (prio) {
+            1 -> BluetoothGatt.CONNECTION_PRIORITY_HIGH
+            2 -> BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER
+            else -> BluetoothGatt.CONNECTION_PRIORITY_BALANCED
+        }
+        return gatt.requestConnectionPriority(mapped)
     }
 
     override fun getBluetoothAvailabilityState(callback: (Result<Long>) -> Unit) {
