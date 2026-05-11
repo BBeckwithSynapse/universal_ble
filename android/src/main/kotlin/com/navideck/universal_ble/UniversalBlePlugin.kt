@@ -40,8 +40,7 @@ import androidx.core.content.edit
 
 @SuppressLint("MissingPermission")
 class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(), FlutterPlugin,
-    ActivityAware, PluginRegistry.ActivityResultListener {
-    PluginRegistry.RequestPermissionsResultListener {
+    ActivityAware, PluginRegistry.ActivityResultListener, PluginRegistry.RequestPermissionsResultListener {
     private val bluetoothEnableRequestCode = 2342313
     private val bluetoothDisableRequestCode = 2342414
     private val permissionRequestCode = 2342515
